@@ -48,14 +48,13 @@ function createApp() {
   app.use(cors({ origin: false }));
 
   // ── Ensure rawBody is always a string (fixes HMAC on GET / no-body) ───────
-  // express.json() only fires its verify() when there IS a body. Seeding
-  // rawBody = '' here guarantees req.rawBody is always defined, so the
-  // middleware hashes '' for GET/empty-body requests — matching the client.
   app.use((req, _res, next) => {
     req.rawBody = '';
     next();
   });
 
+  // ── Body Parsers ──────────────────────────────────────────────────────────
+  // 1. Standard JSON parser (for normal API requests)
   app.use(
     express.json({
       limit: '256kb',
@@ -64,6 +63,31 @@ function createApp() {
       },
     })
   );
+
+  // 2. Fallback Text parser (CRITICAL for MT5)
+  // MT5 does not send a "Content-Type: application/json" header.
+  // This forces Express to read the text body and parse it as JSON if it looks like JSON.
+  app.use(
+    express.text({
+      type: ['text/plain', '*/*'],
+      limit: '256kb',
+      verify: (req, _res, buf) => {
+        req.rawBody = buf.toString('utf8');
+      },
+    })
+  );
+
+  // Post-process text bodies into JSON for MT5
+  app.use((req, _res, next) => {
+    if (typeof req.body === 'string' && req.body.startsWith('{')) {
+      try {
+        req.body = JSON.parse(req.body);
+      } catch (e) {
+        logger.warn({ body: req.body }, 'failed_to_parse_text_as_json');
+      }
+    }
+    next();
+  });
 
   // ── Global rate limit ─────────────────────────────────────────────────────
   app.use(
@@ -120,7 +144,7 @@ function createApp() {
   nonceCleanupTimer.unref();
   app.locals.nonceCleanupTimer = nonceCleanupTimer;
 
-  // ── Health (top-level /health — Render healthCheckPath compatible) ────────
+  // ── Health ────────────────────────────────────────────────────────────────
   const healthHandler = (_req, res) => {
     let db = { connected: false, readyState: 0 };
     try {
