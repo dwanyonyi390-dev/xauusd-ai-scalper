@@ -7,9 +7,10 @@ const heartbeat = require('../../services/heartbeatService');
 const configurationService = require('../../services/configurationService');
 
 // ── Schema ──────────────────────────────────────────────────────────────────
+// We use .passthrough() to allow extra fields sent by MT5 without failing.
 const HeartbeatSchema = z.object({
   agentId: z.string().min(1).optional(),
-  sentAt: z.string().datetime().optional(),
+  sentAt: z.string().optional(), // Relaxed from .datetime() to .string() for MT5 compatibility
 
   balance: z.number().nonnegative(),
   equity: z.number().nonnegative(),
@@ -31,13 +32,14 @@ const HeartbeatSchema = z.object({
   openPositions: z.array(z.any()).optional(),
   openPositionsCount: z.number().int().nonnegative().optional(),
   eaVersion: z.string().optional(),
-});
+}).passthrough();
 
 // ── POST /api/agent/heartbeat ───────────────────────────────────────────────
 async function postHeartbeat(req, res, next) {
   try {
     const parsed = HeartbeatSchema.safeParse(req.body);
     if (!parsed.success) {
+      logger.warn({ issues: parsed.error.issues, body: req.body }, 'heartbeat_validation_failed');
       return res.status(400).json({
         ok: false,
         error: 'invalid_heartbeat',
@@ -89,7 +91,7 @@ async function getConfig(req, res, next) {
 
 // ── POST /api/agent/trade-report ────────────────────────────────────────────
 const TradeReportSchema = z.object({
-  eventId: z.string().min(8), // idempotency key, unique per event
+  eventId: z.string().min(8),
   type: z.enum(['OPEN', 'CLOSE', 'SL_HIT', 'TP_HIT', 'MANUAL_CLOSE', 'REJECTED']),
   tradeId: z.string().min(1),
   ticket: z.union([z.string(), z.number()]),
@@ -104,12 +106,12 @@ const TradeReportSchema = z.object({
   commission: z.number().optional().default(0),
   swap: z.number().optional().default(0),
   netProfit: z.number().optional(),
-  openTime: z.string().datetime().optional(),
-  closeTime: z.string().datetime().optional(),
+  openTime: z.string().optional(),
+  closeTime: z.string().optional(),
   holdingSeconds: z.number().int().nonnegative().optional(),
   exitReason: z.string().optional(),
   raw: z.any().optional(),
-});
+}).passthrough();
 
 async function postTradeReport(req, res, next) {
   try {
@@ -123,9 +125,6 @@ async function postTradeReport(req, res, next) {
     }
     const r = parsed.data;
 
-    // Idempotent upsert in a general "trade_executions" collection.
-    // The Trade model update is intentionally left to tradeManager (Phase 8),
-    // so the EA can report executions even before the trade manager exists.
     const mongoose = require('mongoose');
     const db = mongoose.connection.db;
     if (!db) {
