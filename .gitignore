@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+
+# Environment files — NEVER commit
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+dist/
+build/
+coverage/
+
+# Test output
+.nyc_output/
+
+# MT5 compiled artifacts
+mt5/*.ex5
+mt5/*.mqproj
